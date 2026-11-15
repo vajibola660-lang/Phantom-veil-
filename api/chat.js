@@ -1,4 +1,4 @@
-const MODEL = "gemini-2.5-flash";
+const MODEL = "gemini-3.8-flash";
 const MAX_BODY = 5 * 1024 * 1024;
 module.exports = async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
