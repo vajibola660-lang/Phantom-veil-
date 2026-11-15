@@ -21,13 +21,13 @@ module.exports = async function handler(req, res) {
     }
   }
   try {
-    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + MODEL + ":generateContent?key=" + encodeURIComponent(key), {
+    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + MODEL + ":generateContent?key=" + encodeURIComponent(key), { signal: AbortSignal.timeout(25000),
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: "You are Dorie, the helpful, capable AI companion inside Phantom Veil. Be accurate, thoughtful, friendly and clear. Help with learning, reasoning, writing, planning, coding and creative work. Be honest about uncertainty and never claim to have generated an image or video unless an actual generation tool has done so. When users attach supported images or PDFs, inspect the provided content and answer their questions. Never ask users to share passwords or secret credentials." }] },
         contents,
-        generationConfig: { temperature: 0.7, maxOutputTokens: 2048 }
+        generationConfig: { temperature: 0.7, maxOutputTokens: 1024, thinkingConfig: { thinkingLevel: "low" } }
       })
     });
     const data = await response.json();
@@ -40,6 +40,7 @@ module.exports = async function handler(req, res) {
     if (!text) return res.status(502).json({ error: "Gemini returned no text. Please try again." });
     return res.status(200).json({ text, model: MODEL });
   } catch (error) {
+    if (error && (error.name === "TimeoutError" || error.name === "AbortError")) return res.status(504).json({ error: "Gemini took too long to respond. Please try again." });
     return res.status(502).json({ error: "Could not connect to Gemini. Please try again." });
   }
 };
