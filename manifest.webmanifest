@@ -2,6 +2,7 @@
   "name": "Dorie AI — Phantom Veil",
   "short_name": "Dorie AI",
   "description": "Your Phantom Veil AI companion.",
+  "id": "/dorie.html",
   "start_url": "/dorie.html",
   "scope": "/",
   "display": "standalone",
@@ -10,7 +11,7 @@
   "icons": [
     {
       "src": "/dorie-icon.svg",
-      "sizes": "any",
+      "sizes": "192x192 512x512",
       "type": "image/svg+xml",
       "purpose": "any maskable"
     }
