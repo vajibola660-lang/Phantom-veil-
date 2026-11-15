@@ -1,0 +1,18 @@
+{
+  "name": "Dorie AI — Phantom Veil",
+  "short_name": "Dorie AI",
+  "description": "Your Phantom Veil AI companion.",
+  "start_url": "/dorie.html",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0b0d12",
+  "theme_color": "#0b0d12",
+  "icons": [
+    {
+      "src": "/dorie-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
