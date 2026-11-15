@@ -1,6 +1,7 @@
 const MODEL = "gemini-3.8-flash";
 const FALLBACK_MODEL = "gemini-3.1-flash-lite";
 const MAX_BODY = 5 * 1024 * 1024;
+const MODEL_TIMEOUT_MS = 9000;
 
 module.exports = async function handler(req, res) {
   res.setHeader("Cache-Control", "no-store");
@@ -28,19 +29,37 @@ module.exports = async function handler(req, res) {
   const requestBody = {
     systemInstruction: { parts: [{ text: "You are Dorie, the helpful, capable AI companion inside Phantom Veil. Be accurate, thoughtful, friendly and clear. Help with learning, reasoning, writing, planning, coding and creative work. Be honest about uncertainty and never claim to have generated an image or video unless an actual generation tool has done so. When users attach supported images or PDFs, inspect the provided content and answer their questions. Never ask users to share passwords or secret credentials." }] },
     contents,
-    generationConfig: { temperature: 0.7, maxOutputTokens: 1024, thinkingConfig: { thinkingLevel: "low" } }
+    generationConfig: { temperature: 0.7, maxOutputTokens: 768, thinkingConfig: { thinkingLevel: "low" } }
   };
 
   async function callModel(model) {
-    const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + encodeURIComponent(key), {
-      signal: AbortSignal.timeout(12000),
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(requestBody)
-    });
-    let data;
-    try { data = await response.json(); } catch { data = {}; }
-    return { response, data };
+    const controller = new AbortController();
+    let timer;
+    try {
+      const timeout = new Promise((_, reject) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          const error = new Error("Model request timed out");
+          error.name = "TimeoutError";
+          reject(error);
+        }, MODEL_TIMEOUT_MS);
+      });
+      const request = (async () => {
+        const response = await fetch("https://generativelanguage.googleapis.com/v1beta/models/" + model + ":generateContent?key=" + encodeURIComponent(key), {
+          signal: controller.signal,
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requestBody)
+        });
+        let data;
+        try { data = await response.json(); } catch { data = {}; }
+        return { response, data };
+      })();
+      return await Promise.race([request, timeout]);
+    } finally {
+      clearTimeout(timer);
+      controller.abort();
+    }
   }
 
   try {
@@ -48,28 +67,41 @@ module.exports = async function handler(req, res) {
     let usedModel = MODEL;
     try {
       result = await callModel(MODEL);
-    } catch (error) {
-      // If the primary model is slow or temporarily unavailable, try the free-tier fallback.
-      result = await callModel(FALLBACK_MODEL);
+      if (!result.response.ok && result.response.status !== 429 && result.response.status < 500) {
+        const msg = result.data?.error?.message || "Gemini request failed.";
+        return res.status(502).json({ error: msg });
+      }
+      if (!result.response.ok) {
+        usedModel = FALLBACK_MODEL;
+        result = await callModel(FALLBACK_MODEL);
+      }
+    } catch (primaryError) {
+      // One bounded fallback attempt only; never retry the fallback a second time.
       usedModel = FALLBACK_MODEL;
-    }
-
-    if (!result.response.ok && (result.response.status === 429 || result.response.status >= 500)) {
-      result = await callModel(FALLBACK_MODEL);
-      usedModel = FALLBACK_MODEL;
+      try {
+        result = await callModel(FALLBACK_MODEL);
+      } catch (fallbackError) {
+        const timedOut = primaryError?.name === "TimeoutError" || fallbackError?.name === "TimeoutError" || primaryError?.name === "AbortError" || fallbackError?.name === "AbortError";
+        return res.status(timedOut ? 504 : 502).json({
+          error: timedOut
+            ? "Gemini is taking too long right now. Please try again shortly."
+            : "Could not connect to Gemini right now. Please try again."
+        });
+      }
     }
 
     if (!result.response.ok) {
-      const msg = result.data?.error?.message || "Gemini request failed.";
-      const code = result.response.status === 429 ? 429 : 502;
-      return res.status(code).json({ error: result.response.status === 429 ? "Both Gemini models are busy or their free limits have been reached. Please try again shortly." : msg });
+      return res.status(result.response.status === 429 ? 429 : 502).json({
+        error: result.response.status === 429
+          ? "Gemini is busy or its free usage limit has been reached. Please try again shortly."
+          : (result.data?.error?.message || "Gemini could not complete the request. Please try again.")
+      });
     }
 
-    const text = (result.data.candidates?.[0]?.content?.parts || []).map(p => p.text || "").join("\n").trim();
-    if (!text) return res.status(502).json({ error: "Gemini returned no text. Please try again." });
-    return res.status(200).json({ text, model: usedModel });
+    const answer = (result.data.candidates?.[0]?.content?.parts || []).map(p => p.text || "").join("\n").trim();
+    if (!answer) return res.status(502).json({ error: "Gemini returned no text. Please try again." });
+    return res.status(200).json({ text: answer, model: usedModel });
   } catch (error) {
-    if (error && (error.name === "TimeoutError" || error.name === "AbortError")) return res.status(504).json({ error: "Both Gemini models took too long to respond. Please try again." });
-    return res.status(502).json({ error: "Could not connect to Gemini. Please try again." });
+    return res.status(502).json({ error: "Dorie could not complete that request. Please try again." });
   }
 };
